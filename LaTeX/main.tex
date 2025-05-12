@@ -1,0 +1,472 @@
+\documentclass{article}
+
+\usepackage{amsmath}
+\allowdisplaybreaks
+
+\usepackage{amssymb}
+
+\usepackage{bm}
+\usepackage{siunitx}
+
+\usepackage{varioref,hyperref,cleveref}
+\crefformat{equation}{(#2#1#3)}
+
+% ---
+
+% \usepackage{xcolor}
+% \definecolor{backgroundcolor}{rgb}{0.95,0.95,0.92}
+\usepackage{listings}
+\lstdefinestyle{mystyle}{
+    backgroundcolor=\color{white},
+    commentstyle=\color{green},
+    keywordstyle=\color{magenta},
+    numberstyle=\tiny\color{gray},
+    stringstyle=\color{purple},
+    basicstyle=\ttfamily\footnotesize,
+    breakatwhitespace=false,
+    breaklines=true,
+    captionpos=b,
+    keepspaces=true,
+    numbers=left,
+    numbersep=5pt,
+    showspaces=false,
+    showstringspaces=false,
+    showtabs=false,
+    tabsize=2}
+\lstset{style=mystyle}
+
+% ---
+
+\usepackage{annotate-equations}
+
+\usepackage{xcolor}
+\newcommand{\mathcolorbox}[2]{\colorbox{#1}{$\displaystyle #2$}}
+
+% better border for \colorboxed
+\setlength\fboxsep{2pt} % sets the padding inside the box
+\setlength\fboxrule{2pt} % sets the line thickness
+
+% Syntax: \colorboxed[<color model>]{<color specification>}{<math formula>}
+\newcommand*{\colorboxed}{}
+\def\colorboxed#1#{\colorboxedAux{#1}}
+% #1: optional argument for color model
+% #2: color specification
+% #3: formula
+\newcommand*{\colorboxedAux}[3]{
+    \begingroup
+        \colorlet{cb@saved}{.}
+        \color#1{#2}
+        \boxed{\color{cb@saved}#3}
+    \endgroup
+}
+
+% ---
+
+\title{Blob2D and extensions}
+\author{Gian Antonucci, James Buchanan, Ed Threlfall}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\section{Full model}
+
+From \cite{Arter_Equations_2023}: "Spatially 2-D plasma model incorporating velocity space effects. With the 1-D multispecies fluid work’s having made the generalisation to 2-D straightforward, the challenge here is to start writing a complex proxyapp in production mode, incorporating the research put into design, documentation, code generation and benchmarking. There is an opportunity to study species with both fluid and kinetic representations depending on location relative to the wall. Again this is potentially a useful tool in its own right, capable of revealing deficiencies in previous 2-D modelling work."
+
+The full set of equations for the 2D time-dependent problem System 2-6 \cite[§8]{Arter_Equations_2023} is
+%
+\begin{gather}
+    \mathcolorbox{lime}{ \frac{\partial\omega}{\partial t} = - \nabla \cdot (\omega \bm{v}_{E \times B}) + \nabla \left[ (p_e + p_i) \nabla \times \frac{\bm{b}}{B} \right] + \nabla \cdot \bm{j}_\text{sh} + D_{fvs} \nabla \cdot \nu \nabla_\perp \omega , } \\
+    \mathcolorbox{orange}{ \frac{\partial p_e}{\partial t} = - \nabla \cdot (p_e \bm{v}_{E \times B}) - \frac{\delta_e p_e c_s}{L_\parallel} + S_e^p + D_{fpe} \nabla \cdot (\kappa_{e\perp} n_e \nabla_\perp kT_e) , } \\
+    \mathcolorbox{orange}{ \frac{\partial p_i}{\partial t} = - \nabla \cdot (p_i \bm{v}_{E \times B}) - \frac{\delta_i p_i c_s}{L_\parallel} + S_i^p + D_{fpi} \nabla \cdot (\kappa_{i\perp} n_i \nabla_\perp kT_i) , } \\
+    \mathcolorbox{yellow}{ \frac{\partial n_e}{\partial t} = - \nabla \cdot (n_e \bm{v}_{E \times B}) + \nabla \cdot \frac{\bm{j}_\text{sh}}{|q_e|} - \frac{n_e c_s}{L_\parallel} + S_e^n , } \\
+    \mathcolorbox{brown}{ \nabla \cdot \left[ \frac{m_i}{Z_i |q_e| B^2} \, \nabla_\perp \left( n_{ref} |q_e| \bm{\Phi} + \frac{1}{Z_i} \, p_i \right) \right] = \omega , } \\
+    \mathcolorbox{cyan}{ \bm{v}_{E \times B} = \frac{\bm{B} \times \nabla \bm{\Phi}}{B^2} . } \\
+    \mathcolorbox{orange}{ p = \sum_\alpha n_\alpha kT_\alpha , } \\
+    \rho_m = \sum_\alpha A_\alpha m_u n_\alpha , \\
+    c_s = \sqrt{p / \rho_m} , \\
+    n_e = \sum_{\alpha \ne e} Z_\alpha n_\alpha = Z_i n_i , \\
+    \mathcolorbox{pink}{ \nabla \cdot \bm{j}_\text{sh} = - \frac{n_e |q_e| c_s}{L_\parallel} \, \frac{|q_e| \bm{\Phi}}{kT_{ref}} , } \\
+\end{gather}
+
+Some assumptions have been made:
+%
+\begin{enumerate}
+    \item For starters, it is assumed that there is only one ion-species, $i$.
+    \item Furthermore, cases with $Z_i \ne 1$ are still work-in-progress, so the ion species is assumed hydrogen-like, that is $Z_i = 1$ in the model.
+    \item The sheat heat-trasmission coefficients, taken from \cite[§2.8]{Stangeby_Plasma_2000} with notation '$\gamma_\alpha$', to be $\delta_e = 6.5$ and $\delta_i = 2$.
+\end{enumerate}
+
+\newpage
+
+\section{Blob2D}
+
+We now solve Blob2D. This version is isothermal and cold ion, so only the electron density and vorticity are evolved. A sheath-connected closure is used for the parallel current. The equations, taken from the Hermes3 documentation\footnote{https://hermes3.readthedocs.io/en/latest/examples.html\#d-drift-plane}, are
+%
+\begin{gather}
+    \mathcolorbox{lime}{ \frac{\partial\omega}{\partial t} = - \nabla \cdot (\omega \bm{v}_{E \times B}) + \nabla \cdot \left( p_e \nabla \times \frac{\bm{b}}{B} \right) + \nabla \cdot \bm{j}_\text{sh} , } \label{eq:vorticity} \\
+    \mathcolorbox{yellow}{ \frac{\partial n_e}{\partial t} = - \nabla \cdot (n_e \bm{v}_{E \times B}) + \frac{1}{e} \, \nabla \cdot \bm{j}_\text{sh} , } \label{eq:density} \\
+    \mathcolorbox{brown}{ \nabla \cdot \left( \frac{1}{B^2} \, \nabla_\perp \phi \right) = \omega , } \label{eq:potential} \\
+    \mathcolorbox{orange}{ p_e = n_e eT_e . } \label{eq:pressure}
+\end{gather}
+%
+where $|q_e| = e$ and
+%
+\begin{gather}
+    \bm{E} = - \nabla \phi , \\
+    \mathcolorbox{cyan}{ \bm{v}_{E \times B} = \frac{\bm{E} \times\bm{B}}{B^2} . }
+\end{gather}
+
+The closure is
+%
+\begin{equation}
+    \mathcolorbox{pink}{ \nabla \cdot \bm{j}_\text{sh} = \frac{n_e \phi}{L_\parallel} . } \label{eq:sheath}
+\end{equation}
+
+\textcolor{red}{We assume isothermality}, so the temperature is set to a constant. Hence, following \cref{eq:pressure}, we must first compute the density with \cref{eq:density} to then set the pressure. The vorticity uses the pressure to calculate \textcolor{red}{the diamagnetic current} -- \cref{eq:vorticity} -- so it must come afterwards. The vorticity, in turn, calculates the potential, with \cref{eq:potential}. Finally, the sheath closure -- \cref{eq:sheath} -- uses the potential, so it must come after the vorticity.
+
+\subsection{FEM}
+
+We solve this problem with the finite-element method, using the Python package Firedrake. In particular, we will look for a solution in a space of discontinuous function. A weak form of the vorticity equation \cref{eq:vorticity} in each element $K$ is
+%
+\begin{multline}
+    \int_K \frac{\partial \omega}{\partial t} v_{\omega,K} \, \mathrm{d}\bm{x} = - \int_K \nabla \cdot \left( \omega \bm{v}_{E \times B} \right) v_{\omega,K} \, \mathrm{d}\bm{x} \\
+    + \int_K \nabla \cdot \left( p_e \nabla \times \frac{\bm{b}}{B} \right) v_{\omega,K} \, \mathrm{d}\bm{x} \\
+    + \int_K \nabla \cdot \bm{j}_\text{sh} v_{\omega,K} \, \mathrm{d}\bm{x} , \quad \forall v_{\omega,K} \in K ,
+\end{multline}
+%
+where we explicitly introduce the subscript $K$ since the test functions $v_{\omega,K}$ are local to each element. Using integration by parts on the second term, we get
+%
+\begin{equation}
+    \int_K \nabla \cdot (\omega \bm{v}_{E \times B}) v_{\omega,K} \, \mathrm{d}\bm{x} = \int_{\partial K} v_{\omega,K} \omega \bm{v}_{E \times B} \cdot \hat{\bm{n}} \, \mathrm{d}S - \int_K \omega \nabla v_{\omega,K} \cdot \bm{v}_{E \times B} \, \mathrm{d}\bm{x} ,
+\end{equation}
+%
+where $\hat{\bm{n}}$ is an outward-pointing unit normal.
+
+\newpage
+
+\section{Blob2D-Te-Ti}
+
+A seeded plasma filament in 2D. This version evolves both electron and ion temperatures. A sheath-connected closure is used for the parallel current. The equations this solves are similar to the previous Blob2D case, except now there are pressure equations for both ions and electrons.
+
+\begin{gather}
+    \mathcolorbox{lime}{ \frac{\partial\omega}{\partial t} = - \nabla \cdot (\omega \bm{v}_{E \times B}) + \nabla \cdot \left[ \left( p_e + \colorboxed{red}{p_{h+}} \right) \nabla \times \frac{\bm{b}}{B} \right] + \nabla \cdot \bm{j}_\text{sh} , } \\
+    \mathcolorbox{yellow}{ \frac{\partial n_e}{\partial t} = - \nabla \cdot (n_e \bm{v}_{E \times B}) + \frac{1}{e} \, \nabla \cdot \bm{j}_\text{sh} , } \\
+    \mathcolorbox{brown}{ \nabla \cdot \left( \frac{1}{B^2} \, \nabla_\perp (\phi + \colorboxed{red}{p_{h+}}) \right) = \omega , } \\
+    \colorboxed{red}{ \mathcolorbox{orange}{ \frac{\partial p_e}{\partial t} = - \nabla \cdot (p_e \bm{v}_{E \times B}) - \frac{\gamma_e p_e c_s}{L_\parallel} , } } \\
+    \colorboxed{red}{ \mathcolorbox{orange}{ \frac{\partial p_{h+}}{\partial t} = - \nabla \cdot (p_{h+} \bm{v}_{E \times B}) , } } \\
+    \mathcolorbox{cyan}{ \bm{v}_{E \times B} = \frac{\bm{E} \times\bm{B}}{B^2} , } \\
+    \mathcolorbox{pink}{ \nabla \cdot \bm{j}_\text{sh} = \frac{n_e \phi}{L_\parallel} . }
+\end{gather}
+
+\textcolor{red}{Quasineutrality of the plasma is assumed:}
+%
+\begin{equation}
+    n_{h+} = n_e .
+\end{equation}
+
+\newpage
+
+\section{2D-drift-plane-turbulence-te-ti}
+
+Basically the full-on system.
+
+\begin{gather}
+    \mathcolorbox{lime}{ \frac{\partial\omega}{\partial t} = - \nabla \cdot (\omega \bm{v}_{E \times B}) + \nabla \cdot \left[ (p_e + p_{h+}) \nabla \times \frac{\bm{b}}{B} \right] + \nabla \cdot \bm{j}_\text{sh} , } \\
+    \mathcolorbox{orange}{ p_\text{total} = \sum_\alpha n_\alpha eT_\alpha , } \\
+    \colorboxed{red}{ \rho_\text{total} = \sum_\alpha A_\alpha m_p n_\alpha , } \\
+    \colorboxed{red}{ c_s = \sqrt{p_\text{total} / \rho_\text{total}} , } \\
+    \mathcolorbox{yellow}{ \frac{\partial n_e}{\partial t} = - \nabla \cdot (n_e \bm{v}_{E \times B}) + \nabla \cdot \frac{\bm{j}_\text{sh}}{e} - \colorboxed{red}{ \frac{n_e c_s}{L_\parallel} + S_n } , } \\
+    \mathcolorbox{orange}{ \frac{\partial p_e}{\partial t} = - \nabla \cdot (p_e \bm{v}_{E \times B}) - \frac{\gamma_e p_e c_s}{L_\parallel} + \colorboxed{red}{ S_{p_e} } , } \\
+    \mathcolorbox{orange}{ \frac{\partial p_{h+}}{\partial t} = - \nabla \cdot (p_{h+} \bm{v}_{E \times B}) - \colorboxed{red}{ \frac{\gamma_{h+} p_{h+} c_s}{L_\parallel} + S_{p_{h+}} } , } \\
+    \mathcolorbox{brown}{ \nabla \cdot \colorboxed{red}{ \left[ \frac{\overline{A} m_p}{B^2} \left( \overline{n} \nabla_\perp \phi + \nabla_\perp p_{h+} \right) \right] } = \omega , } \\
+    \mathcolorbox{pink}{ \nabla \cdot \bm{j}_\text{sh} = \colorboxed{red}{ \frac{n_e e \overline{c_s} \phi}{\overline{T} L_\parallel} } , } \\
+    \mathcolorbox{cyan}{ \bm{v}_{E \times B} = \frac{\bm{B} \times \nabla \phi}{B^2} . }
+\end{gather}
+
+\section{Notation of System 2-6}
+
+\begin{itemize}
+    \item $A_\alpha m_u$ atomic mass of species $\alpha$, times atomic mass unit
+    \item $\bm{b}$ unit vector of $\bm{B}$
+    \item $B$ magnitude of $\bm{B}$ ($B = |\bm{B}|$)
+    \item $\bm{B}$ imposed magnetic field
+    \item $c_s$ plasma acoustic speed
+    \item $D_{fpe}$ scale dissipation in equation for evolution of $p_e$ (a Braginskii value, $D_{fpe} = D_{fpi} = 2/3$?)
+    \item $D_{fpi}$ scale dissipation in equation for evolution of $p_i$ (a Braginskii value, $D_{fpe} = D_{fpi} = 2/3$?)
+    \item $D_{fvs}$ scale dissipation in equation for evolution of ? velocity?
+    \item $\delta_e$ energy flux factor at boundary of the electrons (a sheath heat-transmission coefficient)
+    \item $\delta_i$ energy flux factor at boundary of the ion species (a sheath heat-transmission coefficient)
+    \item $\bm{j}_\text{sh}$ sheath plasma-current density
+    \item $kT_\alpha$ temperature of species $\alpha$ (in energy units)
+    \item $kT_e$ temperature of electrons (in energy units)
+    \item $kT_i$ temperature of ions (in energy units)
+    \item $\kappa_{e\perp}$ perpendicular thermal diffusivity of electrons
+    \item $\kappa_{i\perp}$ perpendicular thermal diffusivity of ions
+    \item $L_\parallel$ ?
+    \item $m_i$ mass of ion-species particle ($m_i = Am_u$)
+    \item $m_u$ atomic mass unit (or dalton)
+    \item $n_\alpha$ number density of species $\alpha$
+    \item $n_e$ [2D: \unit{\per\square\metre}] number density of electrons
+    \item $n_i$ number density of ions
+    \item $\nabla_\perp$ ?
+    \item $\nu$ plasma kinematic viscosity
+    \item $\omega$ charge density (works as 'plasma vorticity')?
+    \item $p$ [2D: \unit{\newton\per\metre}] plasma pressure
+    \item $p_e$ pressure of the electrons
+    \item $p_i$ pressure of the ions
+    \item $\bm{\Phi}$ electr(ostat)ic potential
+    \item $q_e$ charge on an electron
+    \item $\rho_m$ mass density of the medium
+    \item $\bm{v}_{E \times B}$ $E \times B$ drift/perpendicular fluid velocity
+    \item $S_e^p$ pressure source-term for electrons ($S_e^p = 2Q_e/3$, where $Q_\alpha$ is the collision operator of species $\alpha$)
+    \item $S_i^p$ pressure source-term for ions ($S_i^p = 2Q_i/3$, where $Q_\alpha$ is the collision operator of species $\alpha$)
+    \item $Z_\alpha$ charge state of species $\alpha$
+    \item $Z_i$ charge state of plasma ions (for simplicity, only Hydrogen, such that $Z_i = 1$)
+\end{itemize}
+
+\section{Firedrake implementation}
+
+We solve the Blob2D problem using Firedrake. As usual, we start by importing Firedrake and the relevant packages.
+
+\begin{lstlisting}[language=Python]
+from firedrake import *
+\end{lstlisting}
+
+We set up a function space of $k-1$-order ($k = 5$) discontinuous-Galerkin elements (DG) for both the vorticity and the electron density, a function space of piecewise linear functions continuous between elements, and a vector-valued continuous function space for the velocity field. Note that for $\omega$ and $n_e$, we use the \texttt{spectral} variant of the finite elements\footnote{From the documentation, at \url{https://www.firedrakeproject.org/variational-problems.html}: "For CG and DG spaces on simplices, Firedrake offers both equispaced points and the better conditioned recursive Legendre points from [Isa20] via the \texttt{recursivenodes} module. These are selected by passing \texttt{variant="equispaced"} or \texttt{variant="spectral"} to the FiniteElement or FunctionSpace() constructors.}. Because we use discontinous-Galerkin elements, we need to integrate over interior facets. To see this consider the following (we set $\bm{v} := \bm{v}_{E \times B}$ for brevity):
+
+\begin{align}
+    \int_\Omega \nabla \cdot (\omega \bm{v}) \, \mathrm{d}x &= \sum_k \int_{\Omega_k} \nabla \cdot (\omega \bm{v}) \, \mathrm{d}x \\
+    & = \sum_k \int_{\Gamma_k} \omega \bm{v} \cdot \bm{\hat{n}} \, \mathrm{d}s \\
+    & = \sum_k \int_{\Gamma_k} (\omega_+ - \omega_-) \left( \bm{v}_+ \cdot \bm{\hat{n}_+} + \bm{v}_- \cdot \bm{\hat{n}_-} \right) \mathrm{d}s
+\end{align}
+
+\clearpage
+
+% Nektar++
+
+\section{Equations to implement}
+
+From the Hermes3 documents, we look to implement the following set of equations:
+
+\begin{align}
+    \frac{\partial n_e}{\partial t} &= -\nabla\cdot(n_e\bm{v}_{\bm{E} \times \bm{B}}) + \frac{1}{e}\nabla\cdot\bm{j}_{\text{sh}},\\
+    \frac{\partial \omega}{\partial t} &= -\nabla\cdot(\omega\bm{v}_{\bm{E} \times \bm{B}}) + \nabla\cdot\left(p_e\nabla\times\frac{\bm{b}}{B} \right) + \nabla\cdot\bm{j}_{\text{sh}}, \\
+    \frac{1}{B^2}\nabla^2\phi &= \omega, \label{eq:phi}
+\end{align}
+where
+\begin{itemize}
+    \item $p_e = en_eT_e$ is the pressure;
+    \item $\nabla\cdot\bm{j}_{\text{sh}} = n_e\phi/L_{\parallel}$ is the
+    sheath closure
+\end{itemize}
+In addition, following Ed's hint and attempting to follow the Hermes3 documents,
+we look to implement the diamagnetic drift term as
+\[
+    \nabla\cdot\left(p_e\nabla\times\frac{\bm{b}}{B} \right) =
+    \frac{eT_e}{R^2} \frac{\partial n_e}{\partial y},
+\]
+where $\nabla\times(\bm{b}/B) = (0,\frac{1}{R^2})$ and $R$ is a constant.
+We use the constants:
+\begin{itemize}
+    \item $e = -1$ is the electron charge (units?);
+    \item $B = \SI{0.35}{T}$;
+    \item $T_e$ is a fixed electron temperature ($\SI{5}{eV}$);
+    \item $L_\parallel = \SI{10}{m}$ is the connection length;
+    \item $R = \SI{1.5}{m}$
+\end{itemize}
+
+\section{Discretisation strategy}
+
+Functionally these equations are similar in form to the Hasegawa-Wakatani
+equations. We therefore adopt the following procedure, using an explicit
+timestepping scheme:
+\begin{itemize}
+    \item Compute the potential $\phi$ by solving equation~\eqref{eq:phi} in a
+    continuous discretisation.
+    \item Use this to compute the drift velocity
+    $\bm{v}_{\bm{E} \times \bm{B}} = B^{-1} (\partial_y\phi, -\partial_x\phi)$.
+    \item Evaluate the terms $-\nabla\cdot(n_e\bm{v}_{\bm{E} \times \bm{B}})$ and
+    $ -\nabla\cdot(\omega\bm{v}_{\bm{E} \times \bm{B}})$ using a DG discretisation.
+    \item Finally evaluate all other source terms.
+\end{itemize}
+
+\section{Test case}
+
+We use the following simulation parameters:
+
+\begin{itemize}
+    \item The domain is taken as $\Omega = [-0.5,0.5]^2$, with periodic boundary
+    conditions used on all sides.
+    \item A mesh of quadrilateral elements at order 5 is used to discretise
+    $\Omega$.
+    \item Fourth order Runge-Kutta timestepping is used with
+    $\Delta t = 2\times 10^{-4}$.
+    \item The various parameter values above are passed into the simulation in the
+    session file.
+    \item As initial condition we use $\omega = 0$ and set
+    \[
+    n_e(x,y,0) = 1 + h \exp\left(-\frac{x^2 + y^2}{w^2} \right)
+    \]
+    where $h = 0.5$ and $w = 0.05$ as in the Hermes3 example.
+\end{itemize}
+
+\appendix
+
+\section{Derivation}
+
+% Each particle has charge $q_s = Z_s e_s$.
+
+\subsection{The distribution function}
+
+A plasma is made up of many kinds of particles (electrons and different kinds of ions). These kinds are called species, labelled $s$, ($e$ for electrons and $i$ for ions). Each particle $i$ has position $\bm{x}_i = (x_i, y_i, z_i) \in \mathbb{R}^3$ and velocity $\bm{v}_i = (v_{x,i}, v_{y,i}, v_{z,i}) \in \mathbb{R}^3$ and can therefore be represented as a point $(\bm{x}, \bm{v})$ in the space $\mathbb{R}^3 \times \mathbb{R}^3$, called the (one-particle) phase space.
+
+If there are $N$ particles, the actual configuration of the full system at any given time is represented by a single point $(\bm{x}_1, \dots, \bm{x}_N, \bm{v}_1, \dots, \bm{v}_N)$ in the (many-particle) phase space $\mathbb{R}^{3N} \times \mathbb{R}^{3N}$. This view of looking at it as a many-body system of microscopic particles is computationally very hard, because the number of the involved equations is $6N$, where $N$ is of the order of the Avogadro number \num{6e23} $6 \times 10^23$. Instead, unless necessary, one often takes a macroscopic view of the problem, the fluid-dynamical one, and looks at the statistical average of quantities.
+
+The state of a species is described by a scalar function $f_s(\bm{x}, \bm{v}, t)$, called the distribution function, which is by definition non-negative such that for any region $D$ of the phase space, the integral
+%
+\begin{equation}
+    \iint_D f_s(\bm{x}, \bm{v}, t) \, \mathrm{d}\bm{x} \, \mathrm{d}\bm{v}
+\end{equation}
+%
+gives the expectation value (statistical average) of the total mass of particle species $s$ contained in $D$ at time $t$.
+
+\subsection{Moments of the distribution function}
+
+$f$ is difficult to obtain experimentally, but we can obtain measurable macroscopic variables from its velocity moments, i.e. integrals of $f_s$ over velocity space multiplied by different functions of $\bm{v}$. For example, a straight integration with no powers of $\bm{v}$, hence called the zeroth moment, gives the number density of particles in real space,
+%
+\begin{equation}
+    n_s(\bm{x}, t) = \int_D f_s(\bm{x}, \bm{v}, t) \, \mathrm{d}\bm{v} .
+\end{equation}
+%
+To form higher moments, it is convenient to denote the average over the particle distribution
+%
+\begin{equation}
+    \langle A \rangle = \frac{1}{n_s} \int_D A(\bm{x}, \bm{v}, t) \, f_s(\bm{x}, \bm{v}, t) \, \mathrm{d}\bm{v} .
+\end{equation}
+%
+The first-order moment is the macroscopic velocity of the fluid, $\bm{u}_s$, is equal to the average velocity of all particles of species $s$ in a certain point in space:
+%
+\begin{equation}
+    \bm{u}_s(\bm{x}, t) = \langle \bm{v} \rangle .
+\end{equation}
+%
+Other important quantities, such as temperature and pressure, are derived from the second-order moment. For starters, it should be noted that the velocity of a particular particle differs from this average velocity by $\bm{v}_s' = \bm{v} - \bm{u}_s$. Then, the temperature $T_s$ is defined so that $3T_s/2$ represents the average kinetic evergy associated with these random velocities,
+%
+\begin{equation}
+    \frac{3}{2} \, T_s(\bm{x}, t) = \left\langle \frac{m_s \bm{v}_s'^2}{2} \right\rangle .
+\end{equation}
+%
+This is because the total energy turns out to be
+%
+\begin{equation}
+    \frac{m_s n_s \langle v^2 \rangle}{2} = \frac{m_s n_s u_s^2}{2} + \frac{3 n_s T_s}{2} ,
+\end{equation}
+%
+where $v = |\bm{v}|$ and $u_s = |\bm{u}_s|$. Also, the pressure $p_s$, the viscosity tensor $\bm{\pi}_s$, and the heat flux $\bm{q}_s$ of each species are defined as
+%
+\begin{gather}
+    p_s = \frac{n_s m_s \langle v'^2 \rangle}{3} = n_s T_s , \\
+    \bm{\pi}_{s,jk} = m_s n_s \langle v_{s,j}'v_{s,k}' \rangle - p_s \delta_{jk} , \\
+    \bm{q}_s = n_s \left\langle \frac{m v_s'^2}{2} \bm{v}_s' \right\rangle .
+\end{gather}
+%
+These quantities are important for when we derive the fluid equations.
+
+\subsection{The Boltzmann equation}
+
+Let's assume that we can ignore all particle interactions and consider an assembly of identical, non-interacting particles with distribution $f$. Can we make such an assumption? We shall see that the long-range Coulomb interactions, which are the cause of cooperative behaviour, can in fact be elegantly accommodated within this model, although short-range collisions have to be described separately.
+
+Consider a small volume in the (6-dimensional) phase space. We assume conservation of particles, i.e. the rate of change of the number of particles in the volume is equal to the net flux of particles into the volume. In real space, since $\dot{\bm{x}} = \bm{v}$, the flux is
+%
+\begin{equation}
+    \int_D f \bm{x} \cdot \mathrm{d}S
+\end{equation}
+
+\subsection{Fluid equations}
+
+\section{Derivation}
+
+Kinetic equation gives time evolution of the distribution function of a given plasma species $s$ .
+
+Multiply by particle velocity, integrate over velocity space , gives the momentum (balance) equation for the species:
+%
+\begin{equation}
+    m_s n_s \frac{\mathrm{d} \bm{v}_s}{\mathrm{d} t} = q_s n_s (\bm{E} + \bm{v}_s \times \bm{B}) - \nabla p_s + - \nabla \cdot \bm{\pi}_s + \underbrace{\bm{F}_{\text{fr},s}}_\text{friction} + \underbrace{\bm{F}_{\text{ext},s}}_\text{external forces} .
+\end{equation}
+
+This model can be obtained by assuming quasi-neutrality and starting with
+the mass-continuity equation (derived from the zeroth-order moment equation) and the current-continuity equation (our closure):
+%
+\begin{gather}
+    \frac{\partial n_e}{\partial t} + \nabla \cdot (n_e \bm{v}_e) = 0 , \\
+    \nabla \cdot \bm{J} = 0.
+\end{gather}
+%
+We consider hydrogen-like ions for simplicity, that is with $Z_i  = 1$. Assuming quasi-neutrality means that we can consider either species for the density equation but it turns out to be easier to consider the electrons. From the mass- and current-continuity equations for the electrons, we substitute the drift velocities of the electrons and ions into the equations. The drift velocity can be calculated from the first-order moment equation (See Helander and Sigmar 'Collisional Transport in Magnetised Plasmas' page 41):
+%
+
+%
+The last terms are dissipative processes related to collisions, \textcolor{red}{which we assume to be small and neglect them}. Taking the cross product with $\bm{B}$ yields
+%
+\begin{equation}
+    m_s n_s \frac{\mathrm{d} \bm{v}_s}{\mathrm{d} t} \times \bm{B} = q_s n_s \bm{E} \times \bm{B} + q_s n_s (\bm{v}_s \times \bm{B}) \times \bm{B} - \nabla p_s \times \bm{B} .
+\end{equation}
+%
+Using the relation
+%
+\begin{equation}
+    (\bm{v} \times \bm{B}) \times \bm{B} = (\bm{v} \cdot \bm{B}) \bm{B} - B^2 \bm{v} = - B^2 \bm{v}_\perp
+\end{equation}
+%
+we get
+%
+\begin{equation}
+    m_s n_s \frac{\mathrm{d} \bm{v}_s}{\mathrm{d} t} \times \bm{B} = q_s n_s \bm{E} \times \bm{B} - q_s n_s B^2 \bm{v}_\perp - \nabla p_s \times \bm{B} .
+\end{equation}
+%
+Substituting $\Omega_s = q_s B / m_s$ and rearranging, we get
+%
+\begin{align}
+    \bm{v}_\perp &= - \frac{m_s}{q_s B^2} \frac{\mathrm{d} \bm{v}_s}{\mathrm{d} t} \times \bm{B} + \frac{\bm{E} \times \bm{B}}{B^2} - \frac{\nabla p_s \times \bm{B}}{q_s n_s B^2} \\
+    &= - \frac{1}{\Omega_s} \frac{\mathrm{d} \bm{v}_s}{\mathrm{d} t} \times \bm{b} + \frac{\bm{E} \times \bm{b}}{B} - \frac{\nabla p_s \times \bm{b}}{q_s n_s B} .
+\end{align}
+%
+The total drift velocity $\bm{v}_e$ is made up of four components:
+%
+\begin{enumerate}
+    \item the parallel \textcolor{red}{streaming} along the magnetic field,
+    \item the $E \times B$-drift,
+    \item the polarisation drift,
+    \item the combined magnetic drift.
+\end{enumerate}
+%
+Thus,
+%
+\begin{equation}
+    \bm{v} = v_\parallel \bm{b} + \overbrace{\frac{\bm{E} \times \bm{B}}{B^2}}^{\bm{v}_{E \times B}} + \frac{1}{\Omega_{ce} B} \frac{\mathrm{d}\bm{E}_\perp}{\mathrm{d}t} - \frac{T}{q_e B} \frac{\bm{B} \times \nabla B}{B^2} ,
+\end{equation}
+%
+where $\bm{b} = \bm{B} / B$. Now, the electron gyrofrequency, defined as $\Omega_{ce} = Z_e q_e B/(m_e c) = -e B/(m_e c)$, is high because $m_e$ is small. This makes the polarization drift negligible (\textcolor{red}{compared to that of the ions}), so we drop it. \textcolor{red}{Additionally, being far from the centre of the tokamak allows us to ignore the magnetic drift of the electrons.} Thus, the drift velocity simplifies to
+%
+\begin{equation}
+    \bm{v} = v_\parallel \bm{b} + \bm{v}_{E \times B} .
+\end{equation}
+%
+Plugging $\bm{v}$ back into the density equation gives
+%
+\begin{equation}
+    \frac{\partial n_e}{\partial t} = - \nabla \cdot (n_e \bm{v}_{E \times B}) - \nabla \cdot (n_e v_\parallel \bm{b}) .
+\end{equation}
+
+\textcolor{red}{We close this by expressing the parallel velocity in terms of the sheath current,} yielding
+%
+\begin{equation}
+    \frac{\partial n_e}{\partial t} = - \nabla \cdot (n_e \bm{v}_{E \times B}) - \frac{\nabla \cdot \bm{J}_\text{sh}}{q_e} .
+\end{equation}
+
+\bibliographystyle{abbrvurl}
+\bibliography{refs}
+
+\end{document}

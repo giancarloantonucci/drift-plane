@@ -1,0 +1,4 @@
+petsc/
+firedrake-configure
+venv/
+.DS_Store
