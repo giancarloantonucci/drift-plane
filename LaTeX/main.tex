@@ -1,27 +1,39 @@
-\documentclass{article}
+\documentclass[12pt]{article}
 
-\usepackage{amsmath}
-\allowdisplaybreaks
+% ===== PAGE LAYOUT =====
+\usepackage[
+    a4paper,
+    left=20mm,
+    right=20mm,
+    top=25mm,
+    bottom=25mm,
+    includeheadfoot % include header/footer in text area
+]{geometry}
 
-\usepackage{amssymb}
-
-\usepackage{bm}
+% ===== CORE PACKAGES =====
+\usepackage{amsmath, amssymb, bm}
+% \allowdisplaybreaks
+\usepackage{mathtools}
 \usepackage{siunitx}
 
-\usepackage{varioref,hyperref,cleveref}
+\usepackage{varioref, hyperref, cleveref}
 \crefformat{equation}{(#2#1#3)}
 
-% ---
-
-% \usepackage{xcolor}
-% \definecolor{backgroundcolor}{rgb}{0.95,0.95,0.92}
+% ===== CODE LISTINGS =====
+\usepackage{xcolor}
 \usepackage{listings}
+
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
+
 \lstdefinestyle{mystyle}{
-    backgroundcolor=\color{white},
-    commentstyle=\color{green},
+    backgroundcolor=\color{backcolour},
+    commentstyle=\color{codegreen},
     keywordstyle=\color{magenta},
-    numberstyle=\tiny\color{gray},
-    stringstyle=\color{purple},
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{codepurple},
     basicstyle=\ttfamily\footnotesize,
     breakatwhitespace=false,
     breaklines=true,
@@ -32,19 +44,20 @@
     showspaces=false,
     showstringspaces=false,
     showtabs=false,
-    tabsize=2}
+    tabsize=2,
+    frame=single,
+    rulecolor=\color{lightgray}
+}
 \lstset{style=mystyle}
 
-% ---
-
+% ===== MATHS BOXING =====
 \usepackage{annotate-equations}
-
-\usepackage{xcolor}
-\newcommand{\mathcolorbox}[2]{\colorbox{#1}{$\displaystyle #2$}}
 
 % better border for \colorboxed
 \setlength\fboxsep{2pt} % sets the padding inside the box
-\setlength\fboxrule{2pt} % sets the line thickness
+\setlength\fboxrule{1pt} % sets the line thickness
+
+\newcommand{\mathcolorbox}[2]{\colorbox{#1}{$\displaystyle #2$}}
 
 % Syntax: \colorboxed[<color model>]{<color specification>}{<math formula>}
 \newcommand*{\colorboxed}{}
@@ -60,34 +73,397 @@
     \endgroup
 }
 
-% ---
+% ===== ADDITIONAL OPTIMISATIONS =====
+\usepackage{microtype}
+\usepackage{lmodern}
+\usepackage{parskip}
+\setlength{\parindent}{0pt} % no paragraph indentation
+\setlength{\parskip}{0.5em} % paragraph spacing
+\usepackage{cancel}
+\usepackage{tabularx}
+\usepackage{array}     % For better column formatting
+\usepackage{booktabs}  % For better horizontal lines
+\usepackage{ragged2e}   % Better text justification
 
+% ===== METADATA =====
 \title{Blob2D and extensions}
-\author{Gian Antonucci, James Buchanan, Ed Threlfall}
-\date{}
+\author{
+    Gian Antonucci \and
+    James Buchanan \and
+    Ed Threlfall
+}
+\date{\today}
 
 \begin{document}
 
 \maketitle
 
-\section{Full model}
+\tableofcontents
 
-From \cite{Arter_Equations_2023}: "Spatially 2-D plasma model incorporating velocity space effects. With the 1-D multispecies fluid work’s having made the generalisation to 2-D straightforward, the challenge here is to start writing a complex proxyapp in production mode, incorporating the research put into design, documentation, code generation and benchmarking. There is an opportunity to study species with both fluid and kinetic representations depending on location relative to the wall. Again this is potentially a useful tool in its own right, capable of revealing deficiencies in previous 2-D modelling work."
+\newpage
+
+\section{Blob2D} \label{sec:blob2d}
+
+We now solve Blob2D. This version is isothermal and cold ion, so only the electron density and vorticity are evolved. A sheath-connected closure is used for the parallel current. The equations, taken from the Hermes3 documentation\footnote{https://hermes3.readthedocs.io/en/latest/examples.html\#d-drift-plane}, are
+%
+\begin{gather}
+    \mathcolorbox{lime}{ \frac{\partial\omega}{\partial t} = - \nabla \cdot (\omega \, \bm{v}_{E \times B}) + \nabla \cdot \left( p_e \nabla \times \frac{\bm{b}}{B} \right) + \nabla \cdot \bm{j}_\text{sh} , } \label{eq:vorticity} \\
+    \mathcolorbox{yellow}{ \frac{\partial n_e}{\partial t} = - \nabla \cdot (n_e \, \bm{v}_{E \times B}) + \frac{1}{e} \, \nabla \cdot \bm{j}_\text{sh} , } \label{eq:density} \\
+    \mathcolorbox{brown}{ \nabla \cdot \left( \frac{1}{B^2} \, \nabla_\perp \phi \right) = \omega , } \label{eq:potential} \\
+    \mathcolorbox{cyan}{ \bm{v}_{E \times B} = \frac{\bm{B} \times \nabla \phi}{B^2} , } \label{eq:ExB_drift_fluid_velocity} \\
+    \mathcolorbox{orange}{ p_e = n_e \, |q_e| \, T_e = n_e \, e \, T_e , } \label{eq:pressure} \\
+    \mathcolorbox{pink}{ \nabla \cdot \bm{j}_\text{sh} = \frac{n_e \phi}{L_\parallel} . } \label{eq:sheath_closure}
+\end{gather}
+
+We assume:
+%
+\begin{itemize}
+    \item Isothermal electrons, so the temperature is set to a constant.
+    \item Cold ions (ion dynamics neglected).
+    \item Electrostatic approximation (no time-varying magnetic fields).
+    \item Sheath-connected parallel closure (simple sink term).
+\end{itemize}
+
+\subsection{Domain, conditions, etc.}
+
+Let $\mathcal{D} \subset \mathbb{R}^2$ be a 2D slab, and $\partial\mathcal{D}$ be its boundary. For this domain, $x$ as radial and $y$ as poloidal direction, and magnetic field in $z$. The domain is taken \textbf{with periodic boundary conditions used on all sides.}
+
+We set the following initial conditions:
+%
+\begin{itemize}
+    \item For the vorticity, we set it to zero initially:
+    %
+    \begin{equation}
+        \omega(\bm{x}, 0) = 0.
+    \end{equation}
+    \item For the electron density, we set a Gaussian blob on top of a background:
+    %
+    \begin{equation}
+        n_e(\bm{x}, 0) = a + h \, \exp \left( - \frac{(x - x_0)^2 + (y - y_0)^2}{w^2} \right),
+    \end{equation}
+    %
+    where $a$ is background density, $h$ is blob amplitude, and $w$ is blob width. $h = 0.5$ and $w = 0.05$, as in the Hermes3 example.
+    \item No initial condition is needed for $\phi$, as it's computed elliptically from $\omega$ using the Poisson equation, which is obviously not an evolution equation.
+\end{itemize}
+
+We set the following boundary conditions:
+%
+\begin{itemize}
+    \item Homogeneous Dirichlet for the electric potential:
+    %
+    \begin{equation}
+        \phi = 0 \quad \text{on } \partial \mathcal{D} .
+    \end{equation}
+    %
+    This reflects sheath-connected walls at the domain boundary.
+    \item Zero-flux or Neumann-type BCs for advection fields (i.e. no inflow of density or vorticity across the boundary):
+    %
+    \begin{equation}
+        \bm{v}_{E \times B} \cdot \hat{\bm{n}} = 0.
+    \end{equation}
+\end{itemize}
+
+\subsection{Simplifying the electric-potential equation}
+
+In \Cref{eq:potential},
+%
+\begin{equation}
+    \nabla_\perp \phi = \nabla \phi - ( \bm{b} \cdot \nabla \phi ) \bm{b}
+\end{equation}
+%
+is the perpendicular gradient. We take $\bm{B} = B \hat{\bm{z}}$, so that $\nabla_\perp \phi = \nabla \phi$ in 2D (no $z$-component).
+
+\subsection{Simplifying the drift fluid velocity}
+
+Since we have $\bm{B} = B \hat{\bm{z}}$, so that \Cref{eq:ExB_drift_fluid_velocity} becomes
+%
+
+\begin{equation}
+    \bm{v}_{E \times B} = \frac{1}{B}
+    \begin{bmatrix}
+        - \partial_y \phi \\
+        \partial_x \phi
+    \end{bmatrix}
+    .
+\end{equation}
+
+\subsection{Simplifying the diamagnetic-drift term}
+
+Following the Hermes3 documents, we take
+%
+\begin{equation}
+    \nabla \times \frac{\bm{b}}{B} =
+    \begin{bmatrix}
+        0 \\
+        \frac{1}{R^2}
+    \end{bmatrix}
+    ,
+\end{equation}
+%
+where $R$ is a constant. Hence, due to \Cref{eq:pressure}, the diamagnetic-drift term becomes
+%
+\begin{equation}
+    \nabla \cdot \left( p_e \, \nabla \times \frac{\bm{b}}{B} \right) =
+    \frac{e \, T_e}{R^2} \, \frac{\partial n_e}{\partial y}.
+\end{equation}
+%
+We use the constants:
+%
+\begin{itemize}
+    \item $e = (-)1$ is the electron charge (units?);
+    \item $B = \SI{0.35}{T}$;
+    \item $T_e$ is a fixed electron temperature ($\SI{5}{eV}$);
+    \item $L_\parallel = \SI{10}{m}$ is the connection length;
+    \item $R = \SI{1.5}{m}$
+\end{itemize}
+
+\subsection{Weak formulation}
+
+We want to solve this problem with the finite-element method, using the Python package Firedrake. In particular, we look for solutions in the space of discontinuous functions. For each element $K$, the weak form of the vorticity equation \cref{eq:vorticity} is
+%
+\begin{equation}
+    \begin{aligned}
+        & \int_K \frac{\partial \omega}{\partial t} \, v_{\omega,K} \, \mathrm{d}\bm{x} \\
+        & \hspace{4em} + \int_K \nabla \cdot ( \omega \, \bm{v}_{E \times B} ) \, v_{\omega,K} \, \mathrm{d}\bm{x} \\
+        & \hspace{8em} - \frac{e \, T_e}{R^2} \int_K \frac{\partial n_e}{\partial y} \, v_{\omega,K} \, \mathrm{d}\bm{x} \\
+        & \hspace{12em} - \frac{1}{L_\parallel} \int_K n_e \, \phi \, v_{\omega,K} \, \mathrm{d}\bm{x} \\
+        & \hspace{16em} = 0 , \quad \forall v_{\omega,K} \in K ,
+    \end{aligned}
+\end{equation}
+%
+where we explicitly introduce the subscript $K$ since the test functions $v_{\omega,K}$ are local to each element. Using integration by parts on the second term, we get
+%
+\begin{equation}
+    \begin{aligned}
+        & \int_K \nabla \cdot (\omega \, \bm{v}_{E \times B}) \, v_{\omega,K} \, \mathrm{d}\bm{x} \\
+        & \hspace{4em} = \int_{\partial K} \omega \, \bm{v}_{E \times B} \cdot \hat{\bm{n}}_K \, v_{\omega,K} \, \mathrm{d}S \\
+        & \hspace{8em} - \int_K \omega \, \bm{v}_{E \times B} \cdot \nabla v_{\omega,K} \, \mathrm{d}\bm{x} ,
+    \end{aligned}
+\end{equation}
+%
+where $\hat{\bm{n}}_K$ is an outward-pointing unit normal.
+
+Since $\omega$ is discontinuous, it can have different values on either side of a facet between two elements. When integrating the advection term, we have to make a choice about which value of $\omega$ to use on the facet when we assemble the equations globally. We will use upwinding: the core idea is to approximate the value of the discontinuous field (here, $\omega$) on a facet (the boundary between two elements) by using the value from the "upwind" side, that is the side from which the flow $\bm{v}_{E \times B}$ is coming. This ensures numerical stability and avoids unphysical oscillations. We note that there are three types of facets that we may encounter:
+%
+\begin{itemize}
+    \item Interior facets (\texttt{dS} in Firedrake). Here, the value of $\omega$ from the upstream side, denoted $\tilde{\omega}$, also called the upwind value, is used. The upwind value $\tilde{\omega}$ is chosen based on the direction of $\bm{v}_{E \times B} \cdot \hat{\bm{n}}$:
+    %
+    \begin{itemize}
+        \item If $\bm{v}_{E \times B} \cdot \hat{\bm{n}}_+ > 0$, flow goes from the "+" side to the "-" side, so $\tilde{\omega} = \omega_+$.
+        \item If $\bm{v}_{E \times B} \cdot \hat{\bm{n}}_+ < 0$, flow goes from the "-" side to the "+" side, so $\tilde{\omega} = \omega_-$.
+    \end{itemize}
+    %
+    \item Exterior facets (\texttt{ds} in Firedrake):
+    \begin{itemize}
+        \item Inflow boundary facets, where $\bm{v}_{E \times B}$ points towards the interior. Here, the upstream value is the prescribed boundary value $\omega_\text{in}$.
+        \item Outflow boundary facets, where $\bm{v}_{E \times B}$ points towards the outside. Here, the upstream value is the interior solution value $\omega$.
+    \end{itemize}
+\end{itemize}
+%
+We must now express our problem in terms of integrals over the entire mesh and over the sets of interior and exterior facets. This is done by summing our earlier expression over all elements $K$. The cell integrals are easy to handle, since $\sum_K \int_K \cdot \mathrm{d}\bm{x} = \int_\mathcal{D} \cdot \mathrm{d}\bm{x}$. The interior facet integrals are more difficult to express, since each facet in the set of interior facets $\Gamma_\text{int}$ appears twice in the $\sum_K \int_{\partial K}$. In other words, contributions arise from both of the neighbouring cells.
+%
+In Firedrake, the separate quantities in the two cells neighbouring an interior facet are denoted by \texttt{+} and \texttt{-}. These markings are arbitrary – \textbf{there is no built-in concept of upwinding} – and the user is responsible for providing a form that works in all cases. We will give an example shortly. The exterior facet integrals are easier to handle, since each facet in the set of exterior facets $\Gamma_{ext}$ appears exactly once in $\sum_K \int_{\partial K}$. The weak form of the vorticity equation is then
+%
+\begin{equation}
+    \begin{aligned}
+        & \int_\mathcal{D} \frac{\partial \omega}{\partial t} \, v_\omega \, \mathrm{d}\bm{x} \\
+        & \hspace{4em} + \int_{\Gamma_\text{int}} \tilde{\omega} \, ( \bm{v}_{E \times B} \cdot \hat{\bm{n}}_+ \, v_{\omega,+} + \bm{v}_{E \times B} \cdot \hat{\bm{n}}_- \, v_{\omega,-} ) \, \mathrm{d}S \\
+        & \hspace{4em} + \cancel{ \int_{\Gamma_\text{ext, inflow}} \omega_\text{in} \, \bm{v}_{E \times B} \cdot \hat{\bm{n}} \, v_\omega \, \mathrm{d}s } \\
+        & \hspace{4em} + \cancel{ \int_{\Gamma_\text{ext, outflow}} \omega \, \bm{v}_{E \times B} \cdot \hat{\bm{n}} \, v_\omega \, \mathrm{d}s } \\
+        & \hspace{8em} - \int_\mathcal{D} \omega \, \bm{v}_{E \times B} \cdot \nabla v_\omega \, \mathrm{d}\bm{x} \\
+        & \hspace{12em} - \frac{e \, T_e}{R^2} \int_\mathcal{D} \frac{\partial n_e}{\partial y} \, v_\omega \, \mathrm{d}\bm{x} \\
+        & \hspace{16em} - \frac{1}{L_\parallel} \int_\mathcal{D} n_e \, \phi \, v_\omega \, \mathrm{d}\bm{x} \\
+        & \hspace{20em} = 0 , \quad \forall v_\omega \in V_\omega .
+    \end{aligned}
+\end{equation}
+
+We proceed similarly for the electron-density equation:
+%
+\begin{equation}
+    \begin{aligned}
+        & \int_\mathcal{D} \frac{\partial n}{\partial t} \, v_n \, \mathrm{d}\bm{x} \\
+        & \hspace{4em} + \int_{\Gamma_\text{int}} \tilde{n} \, ( \bm{v}_{E \times B} \cdot \hat{\bm{n}}_+ \, v_{n,+} + \bm{v}_{E \times B} \cdot \hat{\bm{n}}_- \, v_{n,-} ) \, \mathrm{d}S \\
+        & \hspace{8em} - \int_\mathcal{D} n \, \bm{v}_{E \times B} \cdot \nabla v_n \, \mathrm{d}\bm{x} \\
+        & \hspace{12em} - \frac{1}{e \, L_\parallel} \int_\mathcal{D} n_e \, \phi \, v_n \, \mathrm{d}\bm{x} \\
+        & \hspace{16em} = 0 , \quad \forall v_n \in V_n .
+    \end{aligned}
+\end{equation}
+
+Lastly, for the electric-potential equation \Cref{eq:potential}, we proceed as follows. We multiply by a test function $v_\phi$ and integrate over the full domain. Then we apply integration by parts to the left-hand side:
+%
+\begin{equation}
+    \int_\mathcal{D} \nabla \cdot \left( \frac{1}{B^2} \, \nabla \phi \right) v_\phi \, \mathrm{d}\bm{x} = - \int_\mathcal{D} \frac{1}{B^2} \, \nabla \phi \cdot \nabla v_\phi \, \mathrm{d}\bm{x} + \int_\Gamma \frac{1}{B^2} \, (\nabla \phi \cdot \hat{\bm{n}}) \, v_\phi \, \mathrm{d}S.
+\end{equation}
+%
+The boundary term vanishes because $\phi = 0$ on $\Gamma$, and thus $v_\phi = 0$ on $\Gamma$ (since test functions must satisfy homogeneous Dirichlet conditions where the solution is prescribed). So, the weak form of the electric-potential equation becomes
+%
+\begin{equation}
+    \int_\mathcal{D} \frac{1}{B^2} \, \nabla \phi \cdot \nabla v_\phi \, \mathrm{d}\bm{x} + \int_\mathcal{D} \omega \, v_\phi \, \mathrm{d}\bm{x} = 0, \quad \forall v_\phi \in V_\phi,
+\end{equation}
+%
+where $V_\phi$ is the function space for $\phi$ ($H_0^1(\mathcal{D})$ in this case).
+
+\newpage
+
+\section{Blob2D-Te-Ti}
+
+A seeded plasma filament in 2D. This version evolves both electron and ion temperatures. A sheath-connected closure is used for the parallel current. The equations this solves are similar to the previous Blob2D case, except now there are pressure equations for both ions and electrons.
+
+\begin{gather}
+    \mathcolorbox{lime}{ \frac{\partial\omega}{\partial t} = - \nabla \cdot (\omega \, \bm{v}_{E \times B}) + \nabla \cdot \left[ \left( p_e + \colorboxed{red}{p_{h_+}} \right) \nabla \times \frac{\bm{b}}{B} \right] + \nabla \cdot \bm{j}_\text{sh} , } \\
+    \colorboxed{red}{ \mathcolorbox{orange}{ \frac{\partial p_e}{\partial t} = - \nabla \cdot (p_e \, \bm{v}_{E \times B}) - \frac{\gamma_e p_e c_s}{L_\parallel} , } } \\
+    \colorboxed{red}{ \mathcolorbox{orange}{ \frac{\partial p_{h_+}}{\partial t} = - \nabla \cdot (p_{h_+} \bm{v}_{E \times B}) , } } \\
+    \mathcolorbox{yellow}{ \frac{\partial n_e}{\partial t} = - \nabla \cdot (n_e \, \bm{v}_{E \times B}) + \frac{1}{e} \, \nabla \cdot \bm{j}_\text{sh} , } \\
+    \mathcolorbox{brown}{ \nabla \cdot \left( \frac{1}{B^2} \, \nabla_\perp (\phi + \colorboxed{red}{p_{h_+}}) \right) = \omega , } \\
+    \mathcolorbox{cyan}{ \bm{v}_{E \times B} = \frac{\bm{E} \times\bm{B}}{B^2} , } \\
+    \mathcolorbox{pink}{ \nabla \cdot \bm{j}_\text{sh} = \frac{n_e \phi}{L_\parallel} . }
+\end{gather}
+
+\textcolor{red}{Quasineutrality of the plasma is assumed:}
+%
+\begin{equation}
+    n_{h_+} = n_e .
+\end{equation}
+
+\subsection{Simplifying the diamagnetic-drift term}
+
+In this case too, we take
+%
+\begin{equation}
+    \nabla \times \frac{\bm{b}}{B} =
+    \begin{bmatrix}
+        0 \\
+        \frac{1}{R^2}
+    \end{bmatrix}
+    ,
+\end{equation}
+%
+where $R$ is a constant. Hence, the diamagnetic-drift term becomes
+%
+\begin{equation}
+    \nabla \cdot \left[ ( p_e + p_{h_+} ) \, \nabla \times \frac{\bm{b}}{B} \right] =
+    \frac{1}{R^2} \, \frac{\partial}{\partial y} ( p_e + p_{h_+} ) .
+\end{equation}
+
+\subsection{Conditions}
+
+We need to set some initial conditions for the new variables. Since initially $p_e = n_e \, e \, T_e$ and $T_e$ is constant (isothermal assumption), the initial condition for $p_e$ is directly derived from $n_e$:
+%
+\begin{equation}
+    p_e(\bm{x}, 0) = e \, T_e \, n_e(\bm{x}, 0).
+\end{equation}
+%
+Similarly, $p_{h_+} = n_{h_+} \, e \, T_{h_+}$. Assuming cold ions ($T_{h_+}\approx 0$), initially $p_{h_+}(\bm{x}, 0) = 0$.
+
+In regards to boundary conditions, we have zero-flux ($\bm{v}_{E \times B} \cdot \hat{\bm{n}} = 0$) which indirectly constrain both $p_e$ and $p_{h_+}$ via their advection.
+
+\subsection{Weak formulation}
+
+In addition to what written in \Cref{sec:blob2d}, here we also have the pressure equations. Proceeding as we did for the vorticity and electron-density equations in, we have
+%
+\begin{equation}
+    \begin{aligned}
+        & \int_\mathcal{D} \frac{\partial p_e}{\partial t} \, v_{p_e} \, \mathrm{d}\bm{x} \\
+        & \hspace{4em} + \int_{\Gamma_\text{int}} \tilde{p}_e \, ( \bm{v}_{E \times B} \cdot \hat{\bm{n}}_+ \, v_{p_e,+} + \bm{v}_{E \times B} \cdot \hat{\bm{n}}_- \, v_{p_e,-} ) \, \mathrm{d}S \\
+        & \hspace{8em} - \int_\mathcal{D} p_e \, \bm{v}_{E \times B} \cdot \nabla v_{p_e} \, \mathrm{d}\bm{x} \\
+        & \hspace{12em} - \frac{\gamma_e c_s}{L_\parallel} \int_\mathcal{D} p_e \, v_{p_e} \, \mathrm{d}\bm{x} \\
+        & \hspace{16em} = 0 , \quad \forall v_{p_e} \in V_{p_e} ,
+    \end{aligned}
+\end{equation}
+%
+and
+%
+\begin{equation}
+    \begin{aligned}
+        & \int_\mathcal{D} \frac{\partial p_{h_+}}{\partial t} \, v_{p_{h_+}} \, \mathrm{d}\bm{x} \\
+        & \hspace{4em} + \int_{\Gamma_\text{int}} \tilde{p}_{h_+} \, ( \bm{v}_{E \times B} \cdot \hat{\bm{n}}_+ \, v_{p_{h_+},+} + \bm{v}_{E \times B} \cdot \hat{\bm{n}}_- \, v_{p_{h_+},-} ) \, \mathrm{d}S \\
+        & \hspace{8em} - \int_\mathcal{D} p_{h_+} \, \bm{v}_{E \times B} \cdot \nabla v_{p_{h_+}} \, \mathrm{d}\bm{x} \\
+        & \hspace{12em} = 0 , \quad \forall v_{p_{h_+}} \in V_{p_{h_+}} .
+    \end{aligned}
+\end{equation}
+
+In regards to the electric-potential equation, we've got
+%
+\begin{equation}
+    \int_\mathcal{D} \omega \, v_\phi \, \mathrm{d}\bm{x} - \int_\mathcal{D} \nabla \cdot \left( \frac{1}{B^2} \, \nabla (\phi + p_{h_+}) \right) v_\phi \, \mathrm{d}\bm{x} = 0.
+\end{equation}
+%
+This becomes
+%
+\begin{equation}
+    \begin{aligned}
+        & \int_\mathcal{D} \omega \, v_\phi \mathrm{d}\bm{x} \\
+        & \hspace{4em} + \int_\mathcal{D} \frac{1}{B^2} \, \nabla \phi \cdot \nabla v_\phi \, \mathrm{d}\bm{x} \\
+        & \hspace{8em} + \sum_K \int_K \frac{1}{B^2} \, \nabla p_{h_+} \cdot \nabla v_{\phi,K} \, \mathrm{d}\bm{x} \\
+        & \hspace{12em} - \cancel{ \int_\Gamma \frac{1}{B^2} \, \nabla \phi \cdot \hat{\bm{n}} \, v_\phi \, \mathrm{d}S } \\
+        & \hspace{16em} - \sum_K \int_{\partial K} \frac{1}{B^2} \, \nabla p_{h_+} \cdot \hat{\bm{n}}_K \, v_{\phi,K} \, \mathrm{d}S \\
+        & \hspace{20em} = 0.
+    \end{aligned}
+\end{equation}
+%
+Using the IP method, the facet integrals become
+%
+\begin{equation}
+    \begin{aligned}
+        & \sum_K \int_{\partial K} \frac{1}{B^2} \, \nabla p_{h_+} \cdot \hat{\bm{n}}_K \, v_{\phi,K} \, \mathrm{d}S \\
+        & \hspace{4em} = \cancel{ \int_{\partial\mathcal{D}} \frac{1}{B^2} \, \nabla p_{h_+} \cdot \hat{\bm{n}} \, v_\phi \, \mathrm{d}S } \\
+        & \hspace{8em} + \int_{\Gamma_\text{int}} \frac{1}{B^2} \, \{\!\!\{ \nabla p_{h_+} \}\!\!\} \cdot [\![ v_\phi  ]\!] \, \mathrm{d}S \\
+        & \hspace{12em} + \int_{\Gamma_\text{int}} \frac{1}{B^2} \, [\![ \nabla p_{h_+}  ]\!] \cdot \{\!\!\{ v_\phi \}\!\!\} \, \mathrm{d}S \\
+        & \hspace{16em} + \int_{\Gamma_\text{int}} \frac{1}{B^2} \, \frac{C}{h} \, [\![ p_{h_+}  ]\!] [\![ v_\phi  ]\!] \, \mathrm{d}S
+    \end{aligned}
+\end{equation}
+%
+where $[\![ \cdot ]\!]$ denotes the jump:
+%
+\begin{equation}
+    [\![ v_\phi ]\!] = v_\phi^+ \hat{\bm{n}}^+ + v_\phi^- \hat{\bm{n}}^-
+\end{equation}
+%
+and $\{\!\!\{ \cdot \}\!\!\}$ denotes the average:
+%
+\begin{equation}
+    \{\!\!\{ \nabla p_{h_+} \}\!\!\} = \frac{1}{2} \, (\nabla p_{h_+}^+ + \nabla p_{h_+}^-)
+\end{equation}
+
+\newpage
+
+\section{2D-drift-plane-turbulence-te-ti}
+
+Basically the full-on system.
+
+\begin{gather}
+    \mathcolorbox{lime}{ \frac{\partial\omega}{\partial t} = - \nabla \cdot (\omega \, \bm{v}_{E \times B}) + \nabla \cdot \left[ (p_e + p_{h_+}) \nabla \times \frac{\bm{b}}{B} \right] + \nabla \cdot \bm{j}_\text{sh} , } \\
+    \mathcolorbox{orange}{ \frac{\partial p_e}{\partial t} = - \nabla \cdot (p_e \, \bm{v}_{E \times B}) - \frac{\gamma_e p_e c_s}{L_\parallel} + \colorboxed{red}{ S_{p_e} } , } \\
+    \mathcolorbox{orange}{ \frac{\partial p_{h_+}}{\partial t} = - \nabla \cdot (p_{h_+} \bm{v}_{E \times B}) - \colorboxed{red}{ \frac{\gamma_{h_+} p_{h_+} c_s}{L_\parallel} + S_{p_{h_+}} } , } \\
+    \mathcolorbox{yellow}{ \frac{\partial n_e}{\partial t} = - \nabla \cdot (n_e \, \bm{v}_{E \times B}) + \frac{1}{e} \, \nabla \cdot \bm{j}_\text{sh} - \colorboxed{red}{ \frac{n_e c_s}{L_\parallel} + S_n } , } \\
+    \mathcolorbox{brown}{ \nabla \cdot \colorboxed{red}{ \left[ \frac{\overline{A} m_p}{B^2} \left( \overline{n} \nabla_\perp \phi + \nabla_\perp p_{h_+} \right) \right] } = \omega , } \\
+    \mathcolorbox{cyan}{ \bm{v}_{E \times B} = \frac{\bm{B} \times \nabla \phi}{B^2} . } \\
+    \mathcolorbox{orange}{ p_\text{total} = \sum_\alpha n_\alpha eT_\alpha , } \\
+    \colorboxed{red}{ \rho_\text{total} = \sum_\alpha A_\alpha m_p n_\alpha , } \\
+    \colorboxed{red}{ c_s = \sqrt{p_\text{total} / \rho_\text{total}} , } \\
+    \mathcolorbox{pink}{ \nabla \cdot \bm{j}_\text{sh} = \colorboxed{red}{ \frac{n_e e \overline{c_s} \phi}{\overline{T} L_\parallel} } , }
+\end{gather}
+
+From \cite{Arter_Equations_2023}:
+%
+\begin{quote}
+    Spatially 2-D plasma model incorporating velocity space effects. With the 1-D multispecies fluid work’s having made the generalisation to 2-D straightforward, the challenge here is to start writing a complex proxyapp in production mode, incorporating the research put into design, documentation, code generation and benchmarking. There is an opportunity to study species with both fluid and kinetic representations depending on location relative to the wall. Again this is potentially a useful tool in its own right, capable of revealing deficiencies in previous 2-D modelling work.
+\end{quote}
 
 The full set of equations for the 2D time-dependent problem System 2-6 \cite[§8]{Arter_Equations_2023} is
 %
 \begin{gather}
-    \mathcolorbox{lime}{ \frac{\partial\omega}{\partial t} = - \nabla \cdot (\omega \bm{v}_{E \times B}) + \nabla \left[ (p_e + p_i) \nabla \times \frac{\bm{b}}{B} \right] + \nabla \cdot \bm{j}_\text{sh} + D_{fvs} \nabla \cdot \nu \nabla_\perp \omega , } \\
-    \mathcolorbox{orange}{ \frac{\partial p_e}{\partial t} = - \nabla \cdot (p_e \bm{v}_{E \times B}) - \frac{\delta_e p_e c_s}{L_\parallel} + S_e^p + D_{fpe} \nabla \cdot (\kappa_{e\perp} n_e \nabla_\perp kT_e) , } \\
-    \mathcolorbox{orange}{ \frac{\partial p_i}{\partial t} = - \nabla \cdot (p_i \bm{v}_{E \times B}) - \frac{\delta_i p_i c_s}{L_\parallel} + S_i^p + D_{fpi} \nabla \cdot (\kappa_{i\perp} n_i \nabla_\perp kT_i) , } \\
-    \mathcolorbox{yellow}{ \frac{\partial n_e}{\partial t} = - \nabla \cdot (n_e \bm{v}_{E \times B}) + \nabla \cdot \frac{\bm{j}_\text{sh}}{|q_e|} - \frac{n_e c_s}{L_\parallel} + S_e^n , } \\
-    \mathcolorbox{brown}{ \nabla \cdot \left[ \frac{m_i}{Z_i |q_e| B^2} \, \nabla_\perp \left( n_{ref} |q_e| \bm{\Phi} + \frac{1}{Z_i} \, p_i \right) \right] = \omega , } \\
+    \mathcolorbox{lime}{ \frac{\partial\omega}{\partial t} = - \nabla \cdot (\omega \, \bm{v}_{E \times B}) + \nabla \left[ (p_e + p_i) \, \nabla \times \frac{\bm{b}}{B} \right] + \nabla \cdot \bm{j}_\text{sh} + D_{fvs} \, \nabla \cdot \nu \, \nabla_\perp \omega , } \\
+    \mathcolorbox{orange}{ \frac{\partial p_e}{\partial t} = - \nabla \cdot (p_e \, \bm{v}_{E \times B}) - \frac{\delta_e \, p_e \, c_s}{L_\parallel} + S_e^p + D_{fp_e} \nabla \cdot (\kappa_{e\perp} \, n_e \, \nabla_\perp k \, T_e) , } \\
+    \mathcolorbox{orange}{ \frac{\partial p_i}{\partial t} = - \nabla \cdot (p_i \, \bm{v}_{E \times B}) - \frac{\delta_i \, p_i \, c_s}{L_\parallel} + S_i^p + D_{fp_i} \nabla \cdot (\kappa_{i\perp} \, n_i \, \nabla_\perp k \, T_i) , } \\
+    \mathcolorbox{yellow}{ \frac{\partial n_e}{\partial t} = - \nabla \cdot (n_e \, \bm{v}_{E \times B}) + \frac{1}{|q_e|} \, \nabla \cdot \bm{j}_\text{sh} - \frac{n_e \, c_s}{L_\parallel} + S_e^n , } \\
+    \mathcolorbox{brown}{ \nabla \cdot \left[ \frac{m_i}{Z_i \, |q_e| \, B^2} \, \nabla_\perp \left( n_\text{ref} \, |q_e| \, \bm{\Phi} + \frac{1}{Z_i} \, p_i \right) \right] = \omega , } \\
     \mathcolorbox{cyan}{ \bm{v}_{E \times B} = \frac{\bm{B} \times \nabla \bm{\Phi}}{B^2} . } \\
-    \mathcolorbox{orange}{ p = \sum_\alpha n_\alpha kT_\alpha , } \\
-    \rho_m = \sum_\alpha A_\alpha m_u n_\alpha , \\
+    \mathcolorbox{orange}{ p = \sum_\alpha n_\alpha \, k \, T_\alpha , } \\
+    \rho_m = \sum_\alpha A_\alpha \, m_u \, n_\alpha , \\
     c_s = \sqrt{p / \rho_m} , \\
-    n_e = \sum_{\alpha \ne e} Z_\alpha n_\alpha = Z_i n_i , \\
-    \mathcolorbox{pink}{ \nabla \cdot \bm{j}_\text{sh} = - \frac{n_e |q_e| c_s}{L_\parallel} \, \frac{|q_e| \bm{\Phi}}{kT_{ref}} , } \\
+    n_e = \sum_{\alpha \ne e} Z_\alpha \, n_\alpha = Z_i \, n_i , \\
+    \mathcolorbox{pink}{ \nabla \cdot \bm{j}_\text{sh} = - \frac{n_e \, |q_e| \, c_s}{L_\parallel} \, \frac{|q_e| \, \bm{\Phi}}{k \, T_\text{ref}} , } \\
 \end{gather}
 
 Some assumptions have been made:
@@ -98,110 +474,75 @@ Some assumptions have been made:
     \item The sheat heat-trasmission coefficients, taken from \cite[§2.8]{Stangeby_Plasma_2000} with notation '$\gamma_\alpha$', to be $\delta_e = 6.5$ and $\delta_i = 2$.
 \end{enumerate}
 
-\newpage
-
-\section{Blob2D}
-
-We now solve Blob2D. This version is isothermal and cold ion, so only the electron density and vorticity are evolved. A sheath-connected closure is used for the parallel current. The equations, taken from the Hermes3 documentation\footnote{https://hermes3.readthedocs.io/en/latest/examples.html\#d-drift-plane}, are
-%
-\begin{gather}
-    \mathcolorbox{lime}{ \frac{\partial\omega}{\partial t} = - \nabla \cdot (\omega \bm{v}_{E \times B}) + \nabla \cdot \left( p_e \nabla \times \frac{\bm{b}}{B} \right) + \nabla \cdot \bm{j}_\text{sh} , } \label{eq:vorticity} \\
-    \mathcolorbox{yellow}{ \frac{\partial n_e}{\partial t} = - \nabla \cdot (n_e \bm{v}_{E \times B}) + \frac{1}{e} \, \nabla \cdot \bm{j}_\text{sh} , } \label{eq:density} \\
-    \mathcolorbox{brown}{ \nabla \cdot \left( \frac{1}{B^2} \, \nabla_\perp \phi \right) = \omega , } \label{eq:potential} \\
-    \mathcolorbox{orange}{ p_e = n_e eT_e . } \label{eq:pressure}
-\end{gather}
-%
-where $|q_e| = e$ and
-%
-\begin{gather}
-    \bm{E} = - \nabla \phi , \\
-    \mathcolorbox{cyan}{ \bm{v}_{E \times B} = \frac{\bm{E} \times\bm{B}}{B^2} . }
-\end{gather}
-
-The closure is
-%
-\begin{equation}
-    \mathcolorbox{pink}{ \nabla \cdot \bm{j}_\text{sh} = \frac{n_e \phi}{L_\parallel} . } \label{eq:sheath}
-\end{equation}
-
-\textcolor{red}{We assume isothermality}, so the temperature is set to a constant. Hence, following \cref{eq:pressure}, we must first compute the density with \cref{eq:density} to then set the pressure. The vorticity uses the pressure to calculate \textcolor{red}{the diamagnetic current} -- \cref{eq:vorticity} -- so it must come afterwards. The vorticity, in turn, calculates the potential, with \cref{eq:potential}. Finally, the sheath closure -- \cref{eq:sheath} -- uses the potential, so it must come after the vorticity.
-
-\subsection{FEM}
-
-We solve this problem with the finite-element method, using the Python package Firedrake. In particular, we will look for a solution in a space of discontinuous function. A weak form of the vorticity equation \cref{eq:vorticity} in each element $K$ is
-%
-\begin{multline}
-    \int_K \frac{\partial \omega}{\partial t} v_{\omega,K} \, \mathrm{d}\bm{x} = - \int_K \nabla \cdot \left( \omega \bm{v}_{E \times B} \right) v_{\omega,K} \, \mathrm{d}\bm{x} \\
-    + \int_K \nabla \cdot \left( p_e \nabla \times \frac{\bm{b}}{B} \right) v_{\omega,K} \, \mathrm{d}\bm{x} \\
-    + \int_K \nabla \cdot \bm{j}_\text{sh} v_{\omega,K} \, \mathrm{d}\bm{x} , \quad \forall v_{\omega,K} \in K ,
-\end{multline}
-%
-where we explicitly introduce the subscript $K$ since the test functions $v_{\omega,K}$ are local to each element. Using integration by parts on the second term, we get
-%
-\begin{equation}
-    \int_K \nabla \cdot (\omega \bm{v}_{E \times B}) v_{\omega,K} \, \mathrm{d}\bm{x} = \int_{\partial K} v_{\omega,K} \omega \bm{v}_{E \times B} \cdot \hat{\bm{n}} \, \mathrm{d}S - \int_K \omega \nabla v_{\omega,K} \cdot \bm{v}_{E \times B} \, \mathrm{d}\bm{x} ,
-\end{equation}
-%
-where $\hat{\bm{n}}$ is an outward-pointing unit normal.
-
-\newpage
-
-\section{Blob2D-Te-Ti}
-
-A seeded plasma filament in 2D. This version evolves both electron and ion temperatures. A sheath-connected closure is used for the parallel current. The equations this solves are similar to the previous Blob2D case, except now there are pressure equations for both ions and electrons.
-
-\begin{gather}
-    \mathcolorbox{lime}{ \frac{\partial\omega}{\partial t} = - \nabla \cdot (\omega \bm{v}_{E \times B}) + \nabla \cdot \left[ \left( p_e + \colorboxed{red}{p_{h+}} \right) \nabla \times \frac{\bm{b}}{B} \right] + \nabla \cdot \bm{j}_\text{sh} , } \\
-    \mathcolorbox{yellow}{ \frac{\partial n_e}{\partial t} = - \nabla \cdot (n_e \bm{v}_{E \times B}) + \frac{1}{e} \, \nabla \cdot \bm{j}_\text{sh} , } \\
-    \mathcolorbox{brown}{ \nabla \cdot \left( \frac{1}{B^2} \, \nabla_\perp (\phi + \colorboxed{red}{p_{h+}}) \right) = \omega , } \\
-    \colorboxed{red}{ \mathcolorbox{orange}{ \frac{\partial p_e}{\partial t} = - \nabla \cdot (p_e \bm{v}_{E \times B}) - \frac{\gamma_e p_e c_s}{L_\parallel} , } } \\
-    \colorboxed{red}{ \mathcolorbox{orange}{ \frac{\partial p_{h+}}{\partial t} = - \nabla \cdot (p_{h+} \bm{v}_{E \times B}) , } } \\
-    \mathcolorbox{cyan}{ \bm{v}_{E \times B} = \frac{\bm{E} \times\bm{B}}{B^2} , } \\
-    \mathcolorbox{pink}{ \nabla \cdot \bm{j}_\text{sh} = \frac{n_e \phi}{L_\parallel} . }
-\end{gather}
-
-\textcolor{red}{Quasineutrality of the plasma is assumed:}
-%
-\begin{equation}
-    n_{h+} = n_e .
-\end{equation}
-
-\newpage
-
-\section{2D-drift-plane-turbulence-te-ti}
-
-Basically the full-on system.
-
-\begin{gather}
-    \mathcolorbox{lime}{ \frac{\partial\omega}{\partial t} = - \nabla \cdot (\omega \bm{v}_{E \times B}) + \nabla \cdot \left[ (p_e + p_{h+}) \nabla \times \frac{\bm{b}}{B} \right] + \nabla \cdot \bm{j}_\text{sh} , } \\
-    \mathcolorbox{orange}{ p_\text{total} = \sum_\alpha n_\alpha eT_\alpha , } \\
-    \colorboxed{red}{ \rho_\text{total} = \sum_\alpha A_\alpha m_p n_\alpha , } \\
-    \colorboxed{red}{ c_s = \sqrt{p_\text{total} / \rho_\text{total}} , } \\
-    \mathcolorbox{yellow}{ \frac{\partial n_e}{\partial t} = - \nabla \cdot (n_e \bm{v}_{E \times B}) + \nabla \cdot \frac{\bm{j}_\text{sh}}{e} - \colorboxed{red}{ \frac{n_e c_s}{L_\parallel} + S_n } , } \\
-    \mathcolorbox{orange}{ \frac{\partial p_e}{\partial t} = - \nabla \cdot (p_e \bm{v}_{E \times B}) - \frac{\gamma_e p_e c_s}{L_\parallel} + \colorboxed{red}{ S_{p_e} } , } \\
-    \mathcolorbox{orange}{ \frac{\partial p_{h+}}{\partial t} = - \nabla \cdot (p_{h+} \bm{v}_{E \times B}) - \colorboxed{red}{ \frac{\gamma_{h+} p_{h+} c_s}{L_\parallel} + S_{p_{h+}} } , } \\
-    \mathcolorbox{brown}{ \nabla \cdot \colorboxed{red}{ \left[ \frac{\overline{A} m_p}{B^2} \left( \overline{n} \nabla_\perp \phi + \nabla_\perp p_{h+} \right) \right] } = \omega , } \\
-    \mathcolorbox{pink}{ \nabla \cdot \bm{j}_\text{sh} = \colorboxed{red}{ \frac{n_e e \overline{c_s} \phi}{\overline{T} L_\parallel} } , } \\
-    \mathcolorbox{cyan}{ \bm{v}_{E \times B} = \frac{\bm{B} \times \nabla \phi}{B^2} . }
-\end{gather}
-
 \section{Notation of System 2-6}
 
+\begin{table}[h!]
+    \caption{Notation}
+    \centering
+    \label{tab:notation}
+    \begin{tabularx}{\linewidth}{
+        >{$\RaggedRight}l<{$}    % Math mode + left-aligned + wrap
+        >{\RaggedRight}X         % Left-aligned + auto-wrap
+        >{\RaggedRight}l         % Left-aligned + wrap
+    }
+        \toprule
+        \text{Symbol} & \text{Definition} & \text{Dimension} \\
+        \midrule
+        A_\alpha \, m_u & Atomic mass of species $\alpha$ & \unit{\dalton} (\unit{\kilo\gram}) \\
+        \bm{b} & Unit vector of $\bm{B}$ & –\\
+        B & Magnitude of $\bm{B}$ ($B = |\bm{B}|$) & \unit{\tesla} (\unit{\kilo\gram\per\second\squared\per\ampere}) \\
+        \bm{B} & Imposed magnetic field & \unit{\tesla} (\unit{\kilo\gram\per\second\squared\per\ampere}) \\
+        c_s & Plasma acoustic speed & \unit{\metre\per\second} \\
+        D_{fp_e} & Scale dissipation for $p_e$ evolution & – \\
+        D_{fp_i} & Scale dissipation for $p_i$ evolution & – \\
+        D_{fvs} & Scale dissipation for vorticity evolution & – \\
+        \delta_e & Electron sheath heat-transmission coefficient & – \\
+        \delta_i & Ion sheath heat-transmission coefficient & – \\
+        \bm{j}_\text{sh} & Sheath plasma-current density & \unit{\ampere\per\square\metre} \\
+        k \, T_\alpha & Temperature of species $\alpha$ & \unit{\joule} \\
+        k \, T_e & Electron temperature & \unit{\joule} \\
+        k \, T_i & Ion temperature & \unit{\joule} \\
+        \kappa_{e\perp} & Electron perpendicular thermal diffusivity & \unit{\square\metre\per\second} \\
+        \kappa_{i\perp} & Ion perpendicular thermal diffusivity & \unit{\square\metre\per\second} \\
+        L_\parallel & Parallel connection length & \unit{\metre} \\
+        m_i & Mass of ion-species particle & \unit{\kilo\gram} \\
+        m_u & Atomic mass unit & \unit{\kilo\gram} \\
+        n_\alpha & Number density of species $\alpha$ & \unit{\per\cubic\metre} \\
+        n_e & Electron number density & \unit{\per\cubic\metre} (2D: \unit{\per\square\metre}) \\
+        n_i & Ion number density & \unit{\per\cubic\metre} \\
+        \nabla_\perp & Perpendicular gradient operator & \unit{\per\metre} \\
+        \nu & Plasma kinematic viscosity & \unit{\square\metre\per\second} \\
+        \omega & Plasma vorticity & \unit{\per\second} \\
+        p & Plasma pressure & \unit{\pascal} (2D: \unit{\newton\per\metre}) \\
+        p_e & Electron pressure & \unit{\pascal} \\
+        p_i & Ion pressure & \unit{\pascal} \\
+        \bm{\Phi} & Electrostatic potential & \unit{\volt} \\
+        q_e & Electron charge & \unit{\coulomb} \\
+        \rho_m & Mass density & \unit{\kilo\gram\per\cubic\metre} \\
+        \bm{v}_{E \times B} & ($E \times B$)-drift velocity & \unit{\metre\per\second} \\
+        S_e^p & Electron pressure source term & \unit{\pascal\per\second} \\
+        S_i^p & Ion pressure source term & \unit{\pascal\per\second} \\
+        Z_\alpha & Charge state of species $\alpha$ & – \\
+        Z_i & Ion charge state ($=1$ for Hydrogen) & – \\
+        \bottomrule
+    \end{tabularx}
+\end{table}
+
+\clearpage
+
 \begin{itemize}
-    \item $A_\alpha m_u$ atomic mass of species $\alpha$, times atomic mass unit
-    \item $\bm{b}$ unit vector of $\bm{B}$
     \item $B$ magnitude of $\bm{B}$ ($B = |\bm{B}|$)
     \item $\bm{B}$ imposed magnetic field
     \item $c_s$ plasma acoustic speed
-    \item $D_{fpe}$ scale dissipation in equation for evolution of $p_e$ (a Braginskii value, $D_{fpe} = D_{fpi} = 2/3$?)
-    \item $D_{fpi}$ scale dissipation in equation for evolution of $p_i$ (a Braginskii value, $D_{fpe} = D_{fpi} = 2/3$?)
+    \item $D_{fp_e}$ scale dissipation in equation for evolution of $p_e$ (a Braginskii value, $D_{fp_e} = D_{fp_i} = 2/3$?)
+    \item $D_{fp_i}$ scale dissipation in equation for evolution of $p_i$ (a Braginskii value, $D_{fp_e} = D_{fp_i} = 2/3$?)
     \item $D_{fvs}$ scale dissipation in equation for evolution of ? velocity?
     \item $\delta_e$ energy flux factor at boundary of the electrons (a sheath heat-transmission coefficient)
     \item $\delta_i$ energy flux factor at boundary of the ion species (a sheath heat-transmission coefficient)
     \item $\bm{j}_\text{sh}$ sheath plasma-current density
-    \item $kT_\alpha$ temperature of species $\alpha$ (in energy units)
-    \item $kT_e$ temperature of electrons (in energy units)
-    \item $kT_i$ temperature of ions (in energy units)
+    \item $k \, T_\alpha$ temperature of species $\alpha$ (in energy units)
+    \item $k \, T_e$ temperature of electrons (in energy units)
+    \item $k \, T_i$ temperature of ions (in energy units)
     \item $\kappa_{e\perp}$ perpendicular thermal diffusivity of electrons
     \item $\kappa_{i\perp}$ perpendicular thermal diffusivity of ions
     \item $L_\parallel$ ?
@@ -224,92 +565,6 @@ Basically the full-on system.
     \item $S_i^p$ pressure source-term for ions ($S_i^p = 2Q_i/3$, where $Q_\alpha$ is the collision operator of species $\alpha$)
     \item $Z_\alpha$ charge state of species $\alpha$
     \item $Z_i$ charge state of plasma ions (for simplicity, only Hydrogen, such that $Z_i = 1$)
-\end{itemize}
-
-\section{Firedrake implementation}
-
-We solve the Blob2D problem using Firedrake. As usual, we start by importing Firedrake and the relevant packages.
-
-\begin{lstlisting}[language=Python]
-from firedrake import *
-\end{lstlisting}
-
-We set up a function space of $k-1$-order ($k = 5$) discontinuous-Galerkin elements (DG) for both the vorticity and the electron density, a function space of piecewise linear functions continuous between elements, and a vector-valued continuous function space for the velocity field. Note that for $\omega$ and $n_e$, we use the \texttt{spectral} variant of the finite elements\footnote{From the documentation, at \url{https://www.firedrakeproject.org/variational-problems.html}: "For CG and DG spaces on simplices, Firedrake offers both equispaced points and the better conditioned recursive Legendre points from [Isa20] via the \texttt{recursivenodes} module. These are selected by passing \texttt{variant="equispaced"} or \texttt{variant="spectral"} to the FiniteElement or FunctionSpace() constructors.}. Because we use discontinous-Galerkin elements, we need to integrate over interior facets. To see this consider the following (we set $\bm{v} := \bm{v}_{E \times B}$ for brevity):
-
-\begin{align}
-    \int_\Omega \nabla \cdot (\omega \bm{v}) \, \mathrm{d}x &= \sum_k \int_{\Omega_k} \nabla \cdot (\omega \bm{v}) \, \mathrm{d}x \\
-    & = \sum_k \int_{\Gamma_k} \omega \bm{v} \cdot \bm{\hat{n}} \, \mathrm{d}s \\
-    & = \sum_k \int_{\Gamma_k} (\omega_+ - \omega_-) \left( \bm{v}_+ \cdot \bm{\hat{n}_+} + \bm{v}_- \cdot \bm{\hat{n}_-} \right) \mathrm{d}s
-\end{align}
-
-\clearpage
-
-% Nektar++
-
-\section{Equations to implement}
-
-From the Hermes3 documents, we look to implement the following set of equations:
-
-\begin{align}
-    \frac{\partial n_e}{\partial t} &= -\nabla\cdot(n_e\bm{v}_{\bm{E} \times \bm{B}}) + \frac{1}{e}\nabla\cdot\bm{j}_{\text{sh}},\\
-    \frac{\partial \omega}{\partial t} &= -\nabla\cdot(\omega\bm{v}_{\bm{E} \times \bm{B}}) + \nabla\cdot\left(p_e\nabla\times\frac{\bm{b}}{B} \right) + \nabla\cdot\bm{j}_{\text{sh}}, \\
-    \frac{1}{B^2}\nabla^2\phi &= \omega, \label{eq:phi}
-\end{align}
-where
-\begin{itemize}
-    \item $p_e = en_eT_e$ is the pressure;
-    \item $\nabla\cdot\bm{j}_{\text{sh}} = n_e\phi/L_{\parallel}$ is the
-    sheath closure
-\end{itemize}
-In addition, following Ed's hint and attempting to follow the Hermes3 documents,
-we look to implement the diamagnetic drift term as
-\[
-    \nabla\cdot\left(p_e\nabla\times\frac{\bm{b}}{B} \right) =
-    \frac{eT_e}{R^2} \frac{\partial n_e}{\partial y},
-\]
-where $\nabla\times(\bm{b}/B) = (0,\frac{1}{R^2})$ and $R$ is a constant.
-We use the constants:
-\begin{itemize}
-    \item $e = -1$ is the electron charge (units?);
-    \item $B = \SI{0.35}{T}$;
-    \item $T_e$ is a fixed electron temperature ($\SI{5}{eV}$);
-    \item $L_\parallel = \SI{10}{m}$ is the connection length;
-    \item $R = \SI{1.5}{m}$
-\end{itemize}
-
-\section{Discretisation strategy}
-
-Functionally these equations are similar in form to the Hasegawa-Wakatani
-equations. We therefore adopt the following procedure, using an explicit
-timestepping scheme:
-\begin{itemize}
-    \item Compute the potential $\phi$ by solving equation~\eqref{eq:phi} in a
-    continuous discretisation.
-    \item Use this to compute the drift velocity
-    $\bm{v}_{\bm{E} \times \bm{B}} = B^{-1} (\partial_y\phi, -\partial_x\phi)$.
-    \item Evaluate the terms $-\nabla\cdot(n_e\bm{v}_{\bm{E} \times \bm{B}})$ and
-    $ -\nabla\cdot(\omega\bm{v}_{\bm{E} \times \bm{B}})$ using a DG discretisation.
-    \item Finally evaluate all other source terms.
-\end{itemize}
-
-\section{Test case}
-
-We use the following simulation parameters:
-
-\begin{itemize}
-    \item The domain is taken as $\Omega = [-0.5,0.5]^2$, with periodic boundary
-    conditions used on all sides.
-    \item A mesh of quadrilateral elements at order 5 is used to discretise
-    $\Omega$.
-    \item Fourth order Runge-Kutta timestepping is used with
-    $\Delta t = 2\times 10^{-4}$.
-    \item The various parameter values above are passed into the simulation in the
-    session file.
-    \item As initial condition we use $\omega = 0$ and set
-    \[
-    n_e(x,y,0) = 1 + h \exp\left(-\frac{x^2 + y^2}{w^2} \right)
-    \]
-    where $h = 0.5$ and $w = 0.05$ as in the Hermes3 example.
 \end{itemize}
 
 \appendix
@@ -426,11 +681,11 @@ we get
     m_s n_s \frac{\mathrm{d} \bm{v}_s}{\mathrm{d} t} \times \bm{B} = q_s n_s \bm{E} \times \bm{B} - q_s n_s B^2 \bm{v}_\perp - \nabla p_s \times \bm{B} .
 \end{equation}
 %
-Substituting $\Omega_s = q_s B / m_s$ and rearranging, we get
+Substituting $\mathcal{D}_s = q_s B / m_s$ and rearranging, we get
 %
 \begin{align}
     \bm{v}_\perp &= - \frac{m_s}{q_s B^2} \frac{\mathrm{d} \bm{v}_s}{\mathrm{d} t} \times \bm{B} + \frac{\bm{E} \times \bm{B}}{B^2} - \frac{\nabla p_s \times \bm{B}}{q_s n_s B^2} \\
-    &= - \frac{1}{\Omega_s} \frac{\mathrm{d} \bm{v}_s}{\mathrm{d} t} \times \bm{b} + \frac{\bm{E} \times \bm{b}}{B} - \frac{\nabla p_s \times \bm{b}}{q_s n_s B} .
+    &= - \frac{1}{\mathcal{D}_s} \frac{\mathrm{d} \bm{v}_s}{\mathrm{d} t} \times \bm{b} + \frac{\bm{E} \times \bm{b}}{B} - \frac{\nabla p_s \times \bm{b}}{q_s n_s B} .
 \end{align}
 %
 The total drift velocity $\bm{v}_e$ is made up of four components:
@@ -445,10 +700,10 @@ The total drift velocity $\bm{v}_e$ is made up of four components:
 Thus,
 %
 \begin{equation}
-    \bm{v} = v_\parallel \bm{b} + \overbrace{\frac{\bm{E} \times \bm{B}}{B^2}}^{\bm{v}_{E \times B}} + \frac{1}{\Omega_{ce} B} \frac{\mathrm{d}\bm{E}_\perp}{\mathrm{d}t} - \frac{T}{q_e B} \frac{\bm{B} \times \nabla B}{B^2} ,
+    \bm{v} = v_\parallel \bm{b} + \overbrace{\frac{\bm{E} \times \bm{B}}{B^2}}^{\bm{v}_{E \times B}} + \frac{1}{\mathcal{D}_{ce} B} \frac{\mathrm{d}\bm{E}_\perp}{\mathrm{d}t} - \frac{T}{q_e B} \frac{\bm{B} \times \nabla B}{B^2} ,
 \end{equation}
 %
-where $\bm{b} = \bm{B} / B$. Now, the electron gyrofrequency, defined as $\Omega_{ce} = Z_e q_e B/(m_e c) = -e B/(m_e c)$, is high because $m_e$ is small. This makes the polarization drift negligible (\textcolor{red}{compared to that of the ions}), so we drop it. \textcolor{red}{Additionally, being far from the centre of the tokamak allows us to ignore the magnetic drift of the electrons.} Thus, the drift velocity simplifies to
+where $\bm{b} = \bm{B} / B$. Now, the electron gyrofrequency, defined as $\mathcal{D}_{ce} = Z_e q_e B/(m_e c) = -e B/(m_e c)$, is high because $m_e$ is small. This makes the polarization drift negligible (\textcolor{red}{compared to that of the ions}), so we drop it. \textcolor{red}{Additionally, being far from the centre of the tokamak allows us to ignore the magnetic drift of the electrons.} Thus, the drift velocity simplifies to
 %
 \begin{equation}
     \bm{v} = v_\parallel \bm{b} + \bm{v}_{E \times B} .
@@ -457,13 +712,13 @@ where $\bm{b} = \bm{B} / B$. Now, the electron gyrofrequency, defined as $\Omega
 Plugging $\bm{v}$ back into the density equation gives
 %
 \begin{equation}
-    \frac{\partial n_e}{\partial t} = - \nabla \cdot (n_e \bm{v}_{E \times B}) - \nabla \cdot (n_e v_\parallel \bm{b}) .
+    \frac{\partial n_e}{\partial t} = - \nabla \cdot (n_e \, \bm{v}_{E \times B}) - \nabla \cdot (n_e v_\parallel \bm{b}) .
 \end{equation}
 
 \textcolor{red}{We close this by expressing the parallel velocity in terms of the sheath current,} yielding
 %
 \begin{equation}
-    \frac{\partial n_e}{\partial t} = - \nabla \cdot (n_e \bm{v}_{E \times B}) - \frac{\nabla \cdot \bm{J}_\text{sh}}{q_e} .
+    \frac{\partial n_e}{\partial t} = - \nabla \cdot (n_e \, \bm{v}_{E \times B}) - \frac{\nabla \cdot \bm{J}_\text{sh}}{q_e} .
 \end{equation}
 
 \bibliographystyle{abbrvurl}

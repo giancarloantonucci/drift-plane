@@ -1,4 +1,6 @@
 petsc/
+irksome/
 firedrake-configure
-venv/
+venv-firedrake/
 .DS_Store
+LaTeX/
